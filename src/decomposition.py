@@ -1,11 +1,59 @@
 """
-Sparse feature decomposition methods.
+Feature Decomposition Utilities
 
-This module will contain implementations and utilities
-for studying sparse representations of Transformer Q/K spaces.
+This module contains baseline methods for analyzing
+representation spaces before introducing sparse decomposition.
 """
 
-# TODO:
-# 1. Implement baseline dimensionality reduction.
-# 2. Implement sparse feature decomposition.
-# 3. Compare recovered features.
+import torch
+
+
+def reconstruction_error(
+    original,
+    reconstructed
+):
+    """
+    Calculate mean squared reconstruction error.
+    """
+
+    error = torch.mean(
+        (original - reconstructed) ** 2
+    )
+
+    return error.item()
+
+
+def calculate_sparsity(
+    activations,
+    threshold=1e-5
+):
+    """
+    Calculate the fraction of near-zero activations.
+
+    Higher values indicate a sparser representation.
+    """
+
+    near_zero = (
+        torch.abs(activations) < threshold
+    ).float()
+
+    return near_zero.mean().item()
+
+
+def cosine_similarity(
+    x,
+    y
+):
+    """
+    Calculate cosine similarity between two tensors.
+    """
+
+    x_flat = x.flatten()
+    y_flat = y.flatten()
+
+    similarity = torch.nn.functional.cosine_similarity(
+        x_flat.unsqueeze(0),
+        y_flat.unsqueeze(0)
+    )
+
+    return similarity.item()
