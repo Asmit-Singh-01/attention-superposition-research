@@ -1,61 +1,85 @@
 """
 Attention Analysis Utilities
-
-Utilities for extracting and analyzing Query (Q) and Key (K)
-representations from Transformer attention.
 """
 
 import torch
-import torch.nn.functional as F
 
 
-def compute_attention_scores(Q, K):
+def extract_qk_from_model(model):
+
+    """
+    Extract Q, K, attention scores and attention weights
+    from every Transformer layer.
+    """
+
+    extracted = []
+
+    for layer_index, layer in enumerate(
+        model.layers
+    ):
+
+        attention = layer.attention
+
+        extracted.append({
+
+            "layer": layer_index,
+
+            "Q": attention.last_q,
+
+            "K": attention.last_k,
+
+            "V": attention.last_v,
+
+            "attention_scores":
+                attention.last_attention_scores,
+
+            "attention_weights":
+                attention.last_attention_weights
+
+        })
+
+    return extracted
+
+
+def compute_attention_scores(
+    Q,
+    K
+):
+
     """
     Compute scaled dot-product attention scores.
-
-    Args:
-        Q: Query tensor [batch, sequence, d_k]
-        K: Key tensor [batch, sequence, d_k]
-
-    Returns:
-        Attention score matrix.
     """
 
     d_k = Q.size(-1)
 
-    scores = torch.matmul(
+    return torch.matmul(
         Q,
         K.transpose(-2, -1)
-    ) / torch.sqrt(
-        torch.tensor(d_k, dtype=Q.dtype)
+    ) / (
+        d_k ** 0.5
     )
 
-    return scores
 
+def attention_statistics(
+    attention_weights
+):
 
-def compute_attention_weights(Q, K):
     """
-    Compute normalized attention weights.
-    """
-
-    scores = compute_attention_scores(Q, K)
-
-    weights = F.softmax(
-        scores,
-        dim=-1
-    )
-
-    return weights
-
-
-def attention_statistics(attention_weights):
-    """
-    Calculate basic statistics of an attention matrix.
+    Calculate basic statistics.
     """
 
     return {
-        "mean": attention_weights.mean().item(),
-        "std": attention_weights.std().item(),
-        "min": attention_weights.min().item(),
-        "max": attention_weights.max().item()
+
+        "mean":
+            attention_weights.mean().item(),
+
+        "std":
+            attention_weights.std().item(),
+
+        "min":
+            attention_weights.min().item(),
+
+        "max":
+            attention_weights.max().item()
+
     }
