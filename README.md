@@ -16,6 +16,7 @@ The project combines ideas from:
 
 ---
 
+
 ## 1. Research Question
 
 > Can sparse feature decomposition reveal polysemantic computation inside the Query-Key geometry of Transformer attention?
@@ -236,3 +237,22 @@ attention-superposition-research/
 │   └── Research paper drafts and notes
 │
 └── README.md
+
+
+
+### Phase 0 — Project Setup
+- [x] Repository created
+- [x] Project structure created
+- [x] Research README created
+- [x] Initial research notes created
+
+### Phase 1 — Baseline Infrastructure
+- [x] Small Transformer architecture defined
+- [x] Attention analysis utilities created
+- [x] Representation analysis utilities created
+- [x] Baseline experiment script created
+- [ ] Q/K extraction hooks
+- [ ] Model training
+- [ ] Baseline attention analysis
+
+
