@@ -61,3 +61,30 @@ We investigate:
 3. Can sparse decomposition recover known synthetic features?
 4. Do recovered features explain attention behavior?
 5. Does feature intervention causally affect computation?
+
+
+
+---
+
+## Experimental Architecture
+
+The initial experimental pipeline consists of:
+
+Input Tokens
+↓
+Small Transformer
+↓
+Query-Key Representations
+↓
+Attention Score Matrix
+↓
+Representation Geometry Analysis
+↓
+Sparse Feature Decomposition
+↓
+Feature-Level Evaluation
+↓
+Causal Intervention
+
+The first stage focuses on establishing a reproducible baseline
+before testing the central superposition hypothesis.
