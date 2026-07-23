@@ -255,4 +255,8 @@ attention-superposition-research/
 - [ ] Model training
 - [ ] Baseline attention analysis
 
-
+- [x] Custom Multi-Head Attention implemented
+- [x] Explicit Q/K/V extraction implemented
+- [x] Attention score computation implemented
+- [x] Attention weight extraction implemented
+- [x] Baseline Q/K data-saving pipeline created
