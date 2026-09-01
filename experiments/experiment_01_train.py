@@ -2,12 +2,12 @@
 Experiment 01: Controlled Multi-Task Transformer
 
 Tasks:
-1. Copy a selected token.
-2. Determine parity of the number of odd tokens.
+1. Copy the first token.
+2. Predict the parity of a binary sequence.
 
 Purpose:
-Train a small Transformer on two known computational tasks
-before analysing its Query-Key representation space.
+Create a controlled environment in which the model must
+learn two different computational behaviors.
 """
 
 import os
@@ -18,7 +18,10 @@ from torch.utils.data import Dataset, DataLoader
 
 sys.path.append(
     os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..")
+        os.path.join(
+            os.path.dirname(__file__),
+            ".."
+        )
     )
 )
 
@@ -26,18 +29,23 @@ from src.model import SmallTransformer
 
 
 # ============================================================
-# Configuration
+# Reproducibility
 # ============================================================
 
 SEED = 42
 
 torch.manual_seed(SEED)
 
+
+# ============================================================
+# Configuration
+# ============================================================
+
 DEVICE = torch.device(
     "cuda" if torch.cuda.is_available() else "cpu"
 )
 
-VOCAB_SIZE = 20
+VOCAB_SIZE = 2
 SEQ_LEN = 8
 
 D_MODEL = 64
@@ -45,9 +53,13 @@ N_HEADS = 4
 N_LAYERS = 2
 
 BATCH_SIZE = 32
+
 EPOCHS = 100
 
 LEARNING_RATE = 1e-3
+
+TRAIN_SIZE = 4000
+TEST_SIZE = 1000
 
 
 # ============================================================
@@ -56,34 +68,39 @@ LEARNING_RATE = 1e-3
 
 class MultiTaskDataset(Dataset):
 
-    def __init__(self, size=2000):
-
-        self.size = size
+    def __init__(self, size):
 
         self.inputs = torch.randint(
             0,
-            10,
+            VOCAB_SIZE,
             (size, SEQ_LEN)
         )
 
-        # Copy target:
-        # copy the token at position 0
+        # ----------------------------------------------------
+        # Task 1: Copy
+        # ----------------------------------------------------
+
         self.copy_targets = self.inputs[:, 0]
 
-        # Parity target:
-        # 1 = odd number of odd tokens
-        # 0 = even number of odd tokens
-        odd_count = (
-            self.inputs % 2
+        # ----------------------------------------------------
+        # Task 2: Parity
+        #
+        # Number of 1s:
+        # odd  -> 1
+        # even -> 0
+        # ----------------------------------------------------
+
+        number_of_ones = (
+            self.inputs == 1
         ).sum(dim=1)
 
         self.parity_targets = (
-            odd_count % 2
+            number_of_ones % 2
         ).long()
 
     def __len__(self):
 
-        return self.size
+        return len(self.inputs)
 
     def __getitem__(self, index):
 
@@ -114,7 +131,7 @@ class MultiTaskTransformer(nn.Module):
 
         self.copy_head = nn.Linear(
             D_MODEL,
-            10
+            VOCAB_SIZE
         )
 
         self.parity_head = nn.Linear(
@@ -124,7 +141,6 @@ class MultiTaskTransformer(nn.Module):
 
     def forward(self, x):
 
-        # Reproduce embedding + transformer processing
         batch_size, seq_len = x.shape
 
         positions = torch.arange(
@@ -134,16 +150,19 @@ class MultiTaskTransformer(nn.Module):
 
         hidden = self.transformer.embedding(x)
 
-        hidden = hidden + self.transformer.position_embedding(
-            positions
+        hidden = (
+            hidden
+            +
+            self.transformer.position_embedding(
+                positions
+            )
         )
 
         for layer in self.transformer.layers:
 
             hidden = layer(hidden)
 
-        # Mean pooling gives one representation
-        # for the complete sequence.
+        # Global representation of the sequence
         pooled = hidden.mean(dim=1)
 
         copy_logits = self.copy_head(
@@ -161,6 +180,76 @@ class MultiTaskTransformer(nn.Module):
 
 
 # ============================================================
+# Evaluation
+# ============================================================
+
+def evaluate(model, loader):
+
+    model.eval()
+
+    copy_correct = 0
+    parity_correct = 0
+    total = 0
+
+    with torch.no_grad():
+
+        for (
+            x,
+            copy_target,
+            parity_target
+        ) in loader:
+
+            x = x.to(DEVICE)
+
+            copy_target = copy_target.to(
+                DEVICE
+            )
+
+            parity_target = parity_target.to(
+                DEVICE
+            )
+
+            copy_logits, parity_logits = model(
+                x
+            )
+
+            copy_predictions = (
+                copy_logits.argmax(dim=1)
+            )
+
+            parity_predictions = (
+                parity_logits.argmax(dim=1)
+            )
+
+            copy_correct += (
+                copy_predictions
+                ==
+                copy_target
+            ).sum().item()
+
+            parity_correct += (
+                parity_predictions
+                ==
+                parity_target
+            ).sum().item()
+
+            total += x.size(0)
+
+    copy_accuracy = (
+        copy_correct / total
+    )
+
+    parity_accuracy = (
+        parity_correct / total
+    )
+
+    return (
+        copy_accuracy,
+        parity_accuracy
+    )
+
+
+# ============================================================
 # Training
 # ============================================================
 
@@ -172,15 +261,33 @@ def main():
 
     print("Device:", DEVICE)
 
-    dataset = MultiTaskDataset(
-        size=2000
+    # --------------------------------------------------------
+    # Datasets
+    # --------------------------------------------------------
+
+    train_dataset = MultiTaskDataset(
+        TRAIN_SIZE
     )
 
-    loader = DataLoader(
-        dataset,
+    test_dataset = MultiTaskDataset(
+        TEST_SIZE
+    )
+
+    train_loader = DataLoader(
+        train_dataset,
         batch_size=BATCH_SIZE,
         shuffle=True
     )
+
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=BATCH_SIZE,
+        shuffle=False
+    )
+
+    # --------------------------------------------------------
+    # Model
+    # --------------------------------------------------------
 
     model = MultiTaskTransformer().to(
         DEVICE
@@ -193,21 +300,25 @@ def main():
 
     loss_function = nn.CrossEntropyLoss()
 
+    best_test_score = 0.0
+
+    best_state = None
+
+    # --------------------------------------------------------
+    # Training loop
+    # --------------------------------------------------------
+
     for epoch in range(EPOCHS):
 
         model.train()
 
-        total_loss = 0
-
-        copy_correct = 0
-        parity_correct = 0
-        total = 0
+        total_loss = 0.0
 
         for (
             x,
             copy_target,
             parity_target
-        ) in loader:
+        ) in train_loader:
 
             x = x.to(DEVICE)
 
@@ -236,7 +347,8 @@ def main():
             )
 
             loss = (
-                copy_loss +
+                copy_loss
+                +
                 parity_loss
             )
 
@@ -246,47 +358,46 @@ def main():
 
             total_loss += loss.item()
 
-            copy_predictions = (
-                copy_logits.argmax(dim=1)
-            )
+        # ----------------------------------------------------
+        # Test on unseen data
+        # ----------------------------------------------------
 
-            parity_predictions = (
-                parity_logits.argmax(dim=1)
-            )
-
-            copy_correct += (
-                copy_predictions ==
-                copy_target
-            ).sum().item()
-
-            parity_correct += (
-                parity_predictions ==
-                parity_target
-            ).sum().item()
-
-            total += x.size(0)
-
-        copy_accuracy = (
-            copy_correct / total
+        copy_accuracy, parity_accuracy = evaluate(
+            model,
+            test_loader
         )
 
-        parity_accuracy = (
-            parity_correct / total
-        )
+        test_score = (
+            copy_accuracy
+            +
+            parity_accuracy
+        ) / 2
+
+        if test_score > best_test_score:
+
+            best_test_score = test_score
+
+            best_state = {
+                key: value.detach().cpu().clone()
+                for key, value
+                in model.state_dict().items()
+            }
 
         average_loss = (
-            total_loss / len(loader)
+            total_loss
+            /
+            len(train_loader)
         )
 
         print(
-            f"Epoch {epoch + 1:02d} | "
+            f"Epoch {epoch + 1:03d} | "
             f"Loss: {average_loss:.4f} | "
-            f"Copy: {copy_accuracy:.3f} | "
-            f"Parity: {parity_accuracy:.3f}"
+            f"Test Copy: {copy_accuracy:.3f} | "
+            f"Test Parity: {parity_accuracy:.3f}"
         )
 
     # --------------------------------------------------------
-    # Save trained model
+    # Save best model
     # --------------------------------------------------------
 
     os.makedirs(
@@ -294,23 +405,62 @@ def main():
         exist_ok=True
     )
 
-    torch.save(
-        model.state_dict(),
+    model.load_state_dict(
+        best_state
+    )
+
+    model_path = (
         "models/experiment_01/"
         "multitask_transformer.pt"
     )
 
+    torch.save(
+        model.state_dict(),
+        model_path
+    )
+
+    # --------------------------------------------------------
+    # Final evaluation
+    # --------------------------------------------------------
+
+    final_copy, final_parity = evaluate(
+        model,
+        test_loader
+    )
+
     print()
     print("=" * 60)
-    print("TRAINING COMPLETE")
+    print("FINAL UNSEEN-DATA RESULTS")
     print("=" * 60)
 
     print(
-        "Model saved to:"
-        " models/experiment_01/"
-        "multitask_transformer.pt"
+        f"Copy accuracy:   {final_copy:.4f}"
+    )
+
+    print(
+        f"Parity accuracy: {final_parity:.4f}"
+    )
+
+    if (
+        final_copy >= 0.90
+        and final_parity >= 0.90
+    ):
+
+        print()
+        print("BASELINE STATUS: PASS")
+
+    else:
+
+        print()
+        print("BASELINE STATUS: NEEDS IMPROVEMENT")
+
+    print()
+    print(
+        "Best model saved to:",
+        model_path
     )
 
 
 if __name__ == "__main__":
+
     main()
