@@ -1,13 +1,13 @@
 """
-Experiment 01: Controlled Multi-Task Transformer (Upgraded)
+Experiment 01: Controlled Multi-Task Transformer (The Grokking Upgrade)
 
 Tasks:
 1. Copy the first token.
 2. Predict the parity of a binary sequence.
 
 Purpose:
-Create a controlled environment in which the model must
-learn two different computational behaviors without cheating.
+Create a controlled environment where the model must learn two different 
+computational behaviors, utilizing a non-linear head to conquer the XOR trap.
 """
 
 import os
@@ -43,14 +43,17 @@ DEVICE = torch.device(
 )
 
 VOCAB_SIZE = 2
-SEQ_LEN = 16  # 🔥 Changed to 16 to stop pure memorization!
+SEQ_LEN = 16  # Prevents pure memorization
 
 D_MODEL = 64
 N_HEADS = 4
 N_LAYERS = 2
 
 BATCH_SIZE = 32
-EPOCHS = 100
+
+# 🔥 Patience is a virtue. Parity grokking takes time!
+EPOCHS = 1500 
+
 LEARNING_RATE = 1e-3
 
 TRAIN_SIZE = 4000
@@ -101,9 +104,15 @@ class MultiTaskTransformer(nn.Module):
             max_seq_len=SEQ_LEN
         )
 
-        # 🔥 Fix: Flattened representation needs D_MODEL * SEQ_LEN
+        # Flattened sequence projection
         self.copy_head = nn.Linear(D_MODEL * SEQ_LEN, VOCAB_SIZE)
-        self.parity_head = nn.Linear(D_MODEL * SEQ_LEN, 2)
+        
+        # 🔥 The Stark Reactor Upgrade: Non-linear MLP for XOR/Parity logic
+        self.parity_head = nn.Sequential(
+            nn.Linear(D_MODEL * SEQ_LEN, D_MODEL * 2),
+            nn.GELU(),
+            nn.Linear(D_MODEL * 2, 2)
+        )
 
     def forward(self, x):
         batch_size, seq_len = x.shape
@@ -119,7 +128,7 @@ class MultiTaskTransformer(nn.Module):
         for layer in self.transformer.layers:
             hidden = layer(hidden)
 
-        # 🔥 Fix: Flattening the sequence instead of taking mean
+        # 🔥 Flatten the sequence instead of taking mean
         pooled = hidden.reshape(batch_size, -1)
 
         copy_logits = self.copy_head(pooled)
@@ -164,7 +173,7 @@ def evaluate(model, loader):
 
 def main():
     print("=" * 60)
-    print("EXPERIMENT 01: CONTROLLED MULTI-TASK TRAINING (UPGRADED)")
+    print("EXPERIMENT 01: CONTROLLED MULTI-TASK TRAINING (GROKKING)")
     print("=" * 60)
     print("Device:", DEVICE)
 
@@ -196,7 +205,7 @@ def main():
             copy_loss = loss_function(copy_logits, copy_target)
             parity_loss = loss_function(parity_logits, parity_target)
 
-            # 🔥 Fix: Force the network to care more about the Parity task
+            # Force the network to pay attention to the Parity task
             loss = copy_loss + (3.0 * parity_loss)
 
             loss.backward()
@@ -216,12 +225,14 @@ def main():
 
         average_loss = total_loss / len(train_loader)
 
-        print(
-            f"Epoch {epoch + 1:03d} | "
-            f"Loss: {average_loss:.4f} | "
-            f"Test Copy: {copy_accuracy:.3f} | "
-            f"Test Parity: {parity_accuracy:.3f}"
-        )
+        # Print logic updated to reduce terminal spam
+        if (epoch + 1) % 50 == 0 or epoch == 0:
+            print(
+                f"Epoch {epoch + 1:04d} | "
+                f"Loss: {average_loss:.4f} | "
+                f"Test Copy: {copy_accuracy:.3f} | "
+                f"Test Parity: {parity_accuracy:.3f}"
+            )
 
     os.makedirs("models/experiment_01", exist_ok=True)
     model.load_state_dict(best_state)
@@ -237,12 +248,11 @@ def main():
     print(f"Parity accuracy: {final_parity:.4f}")
 
     if final_copy >= 0.90 and final_parity >= 0.90:
-        print("\nBASELINE STATUS: PASS")
+        print("\nBASELINE STATUS: PASS 🚀")
     else:
-        print("\nBASELINE STATUS: NEEDS IMPROVEMENT")
+        print("\nBASELINE STATUS: NEEDS IMPROVEMENT 💀")
 
     print(f"\nBest model saved to: {model_path}")
 
 if __name__ == "__main__":
     main()
-        
