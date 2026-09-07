@@ -1,0 +1,72 @@
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import numpy as np
+import json
+
+def set_seed(seed=42):
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+
+def run_opt_control():
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    d = 8
+    ratios = [0.5, 1.0, 2.0, 4.0]
+    p = 0.05
+    batch_size = 256
+
+    optimizers = ["AdamW", "SGD_Momentum"]
+    lrs = [1e-2, 1e-3, 1e-4]
+    epochs_list = [1500, 5000]
+
+    results = {}
+
+    print("🚀 Running Experiment #2: Optimization Control Sweeps...")
+
+    for r in ratios:
+        N = int(d * r)
+        results[r] = {}
+        for opt_name in optimizers:
+            results[r][opt_name] = {}
+            for lr in lrs:
+                results[r][opt_name][lr] = {}
+                for ep in epochs_list:
+                    set_seed(42)
+                    # Bernoulli-Gaussian data
+                    bernoulli = torch.bernoulli(torch.full((batch_size, N), p, device=device))
+                    gaussian = torch.randn(batch_size, N, device=device)
+                    X = bernoulli * gaussian
+                    A_gt = torch.matmul(X, X.T)
+
+                    WQ = nn.Parameter(torch.randn(d, N, device=device) * 0.02)
+                    WK = nn.Parameter(torch.randn(d, N, device=device) * 0.02)
+
+                    if opt_name == "AdamW":
+                        optimizer = optim.AdamW([WQ, WK], lr=lr, weight_decay=1e-4)
+                    else:
+                        optimizer = optim.SGD([WQ, WK], lr=lr, momentum=0.9)
+
+                    for epoch in range(ep):
+                        optimizer.zero_grad()
+                        Q = torch.matmul(X, WQ.T)
+                        K = torch.matmul(X, WK.T)
+                        A_hat = torch.matmul(Q, K.T) / np.sqrt(d)
+                        loss = torch.mean((A_gt - A_hat) ** 2)
+                        loss.backward()
+                        optimizer.step()
+
+                    with torch.no_grad():
+                        Q = torch.matmul(X, WQ.T)
+                        K = torch.matmul(X, WK.T)
+                        A_hat = torch.matmul(Q, K.T) / np.sqrt(d)
+                        frob_err = (torch.norm(A_gt - A_hat, p='fro') / torch.norm(A_gt, p='fro')).item()
+
+                    results[r][opt_name][lr][ep] = frob_err
+                    print(f"N/d={r} | Opt={opt_name} | LR={lr} | Epochs={ep} => Frob Err: {frob_err:.4f}")
+
+    with open("opt_control_results.json", "w") as f:
+        json.dump(results, f, indent=4)
+    print("✅ Optimization Control results saved to opt_control_results.json!")
+
+if __name__ == "__main__":
+    run_opt_control()
