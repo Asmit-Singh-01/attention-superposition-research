@@ -1,0 +1,73 @@
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import numpy as np
+import json
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+def set_seed(seed=42):
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+
+def run_sparsity_sweep():
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    d = 8
+    p_vals = [0.01, 0.02, 0.05, 0.10, 0.20, 0.40]
+    ratios = [0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0, 8.0]
+    batch_size = 256
+    epochs = 1500
+    lr = 1e-3
+
+    grid = np.zeros((len(p_vals), len(ratios)))
+
+    print("🚀 Running Experiment #3: Sparsity vs. Load Grid Sweep...")
+
+    for i, p in enumerate(p_vals):
+        for j, r in enumerate(ratios):
+            N = int(d * r)
+            set_seed(42)
+
+            # Bernoulli-Gaussian Data
+            bernoulli = torch.bernoulli(torch.full((batch_size, N), p, device=device))
+            gaussian = torch.randn(batch_size, N, device=device)
+            X = bernoulli * gaussian
+            A_gt = torch.matmul(X, X.T)
+
+            WQ = nn.Parameter(torch.randn(d, N, device=device) * 0.02)
+            WK = nn.Parameter(torch.randn(d, N, device=device) * 0.02)
+            optimizer = optim.AdamW([WQ, WK], lr=lr, weight_decay=1e-4)
+
+            for epoch in range(epochs):
+                optimizer.zero_grad()
+                Q = torch.matmul(X, WQ.T)
+                K = torch.matmul(X, WK.T)
+                A_hat = torch.matmul(Q, K.T) / np.sqrt(d)
+                loss = torch.mean((A_gt - A_hat) ** 2)
+                loss.backward()
+                optimizer.step()
+
+            with torch.no_grad():
+                Q = torch.matmul(X, WQ.T)
+                K = torch.matmul(X, WK.T)
+                A_hat = torch.matmul(Q, K.T) / np.sqrt(d)
+                frob_err = (torch.norm(A_gt - A_hat, p='fro') / torch.norm(A_gt, p='fro')).item()
+
+            grid[i, j] = frob_err
+            print(f"p={p:0.2f} | N/d={r:3.1f} => Frob Err: {frob_err:.4f}")
+
+    # Save heatmap plot
+    plt.figure(figsize=(9, 5))
+    sns.heatmap(grid, annot=True, fmt=".3f", cmap="magma_r",
+                xticklabels=[str(r) for r in ratios],
+                yticklabels=[f"{int(p*100)}%" for p in p_vals])
+    plt.xlabel("Normalized Feature Load ($N/d$)")
+    plt.ylabel("Activation Density / Sparsity ($p$)")
+    plt.title("Q-K Attention Interference Phase Diagram ($d=8$)")
+    plt.tight_layout()
+    plt.savefig("sparsity_phase_diagram.png", dpi=300)
+    plt.savefig("sparsity_phase_diagram.pdf")
+    print("✅ Sparsity Phase Diagram saved!")
+
+if __name__ == "__main__":
+    run_sparsity_sweep()
