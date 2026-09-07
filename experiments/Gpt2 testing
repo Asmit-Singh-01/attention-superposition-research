@@ -1,0 +1,60 @@
+import torch
+import numpy as np
+import matplotlib.pyplot as plt
+from transformers import AutoModelForCausalLM
+
+# 1. Load Pre-trained GPT-2
+model_name = "gpt2"
+model = AutoModelForCausalLM.from_pretrained(model_name)
+
+# Extract Layer 0, Head 0 weights
+c_attn_weight = model.transformer.h[0].attn.c_attn.weight.detach() # [768, 2304]
+d_model, d_head = 768, 64
+
+W_q = c_attn_weight[:, :d_model][:, :d_head] # [768, 64]
+W_k = c_attn_weight[:, d_model:2*d_model][:, :d_head] # [768, 64]
+
+# Bilinear Operator W_QK = W_Q * W_K^T
+W_QK = torch.matmul(W_q, W_k.T).numpy() # [768, 768]
+
+# 2. Experiment Loop with Correct Projection Reconstruction
+np.random.seed(42)
+ratios = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0]
+errors = []
+
+for ratio in ratios:
+    N = int(d_head * ratio)
+
+    # Generate sparse synthetic feature activations mapped to d_model
+    X = np.random.randn(256, N)
+    P = np.random.randn(N, d_model) # Projection to hidden space
+    P = P / np.linalg.norm(P, axis=1, keepdims=True)
+
+    X_hidden = X @ P
+
+    # Ground Truth Attention Scores
+    A_gt = X @ X.T
+
+    # Low-rank QK Projection Attention Scores
+    A_hat = (X_hidden @ W_QK @ X_hidden.T) / np.sqrt(d_head)
+
+    # Optimal scaling factor solve
+    scale = np.sum(A_gt * A_hat) / np.sum(A_hat ** 2)
+    A_hat_scaled = A_hat * scale
+
+    # Relative Frobenius Error
+    err = np.linalg.norm(A_gt - A_hat_scaled, 'fro') / np.linalg.norm(A_gt, 'fro')
+    errors.append(err)
+
+# 3. Plotting
+plt.figure(figsize=(8, 5))
+plt.plot(ratios, errors, marker='o', color='#8B0000', linewidth=2, label='GPT-2 Layer 0 Head 0 ($d_{head}=64$)')
+plt.axvline(x=1.0, color='gray', linestyle='--', label='Theoretical Boundary ($N/d = 1.0$)')
+plt.title("Empirical Phase Transition on Pre-trained GPT-2 Attention Weights", fontsize=12, fontweight='bold')
+plt.xlabel("Normalized Feature Load ($N / d_{head}$)", fontsize=11)
+plt.ylabel("Relative Frobenius Score Error ($\Delta_{score}$)", fontsize=11)
+plt.grid(True, alpha=0.3)
+plt.legend(fontsize=10)
+plt.tight_layout()
+plt.savefig("gpt2_phase_transition_fixed.png", dpi=300)
+plt.show()
