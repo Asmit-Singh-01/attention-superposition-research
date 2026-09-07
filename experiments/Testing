@@ -1,0 +1,33 @@
+import torch, torch.nn as nn, torch.optim as optim, numpy as np
+
+def test_mitigation():
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    d, N_vals, p, B = 8, [8, 16, 32], 0.05, 256 # N/d = 1.0, 2.0, 4.0
+
+    for r in [1.0, 2.0, 4.0]:
+        N = int(d * r)
+        X = torch.bernoulli(torch.full((B, N), p, device=device)) * torch.randn(B, N, device=device)
+        A_gt = torch.matmul(X, X.T)
+
+        # Test baseline vs LayerNorm vs High Weight Decay (L2)
+        for mode in ['Standard', 'LayerNorm', 'L2_Penalty']:
+            torch.manual_seed(42)
+            WQ, WK = nn.Parameter(torch.randn(d, N, device=device)*0.02), nn.Parameter(torch.randn(d, N, device=device)*0.02)
+            ln = nn.LayerNorm(N, elementwise_affine=False).to(device) if mode == 'LayerNorm' else None
+
+            wd = 1e-1 if mode == 'L2_Penalty' else 1e-4
+            opt = optim.AdamW([WQ, WK], lr=1e-3, weight_decay=wd)
+
+            for _ in range(2000):
+                opt.zero_grad()
+                X_in = ln(X) if ln else X
+                A_hat = torch.matmul(torch.matmul(X_in, WQ.T), torch.matmul(X_in, WK.T).T) / np.sqrt(d)
+                loss = torch.mean((A_gt - A_hat)**2)
+                loss.backward()
+                opt.step()
+
+            err = (torch.norm(A_gt - A_hat, p='fro') / torch.norm(A_gt, p='fro')).item()
+            print(f"N/d={r} | Mode: {mode:12s} => Frob Err: {err:.4f}")
+
+if __name__ == "__main__":
+    test_mitigation()
